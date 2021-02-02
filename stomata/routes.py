@@ -32,14 +32,24 @@ def api_key_required(f):  # type: ignore
         """ checks the API keys """
         try:
             if request.headers.get("Pinata-Api-Key") != app.config["STOMATA_API_KEY"]:
-                return {"Error": "Authentication key invalid"}, 403
+                return {
+                    "error": {
+                        "reason": "INVALID_API_KEYS",
+                        "details": "Invalid API key provided",
+                    }
+                }, 401
             if (
                 request.headers.get("Pinata-Secret-Api-Key")
                 != app.config["STOMATA_SECRET_API_KEY"]
             ):
-                return {"Error": "Authentication secret key invalid"}, 403
+                return {
+                    "error": {
+                        "reason": "INVALID_API_KEYS",
+                        "details": "Invalid secret API key provided",
+                    }
+                }, 401
         except KeyError as e:
-            return {"Error": str(e)}, 400
+            return {"error": str(e)}, 500
 
         # success
         return f(*args, **kwargs)
@@ -77,15 +87,16 @@ def hash_metadata() -> Any:
         payload = json.loads(request.data.decode("utf8"))
         ipfs_hash = payload["ipfsPinHash"]
     except KeyError as e:
-        return {"Error": str(e)}, 400
+        return {"error": str(e)}, 500
 
     # find in database
     try:
         ipfs = db.session.query(Ipfs).filter(Ipfs.pin_hash == ipfs_hash).one()
     except NoResultFound as e:
-        return {"Error": str(e)}, 400
+        return {"error": str(e)}, 500
 
-    ipfs.name = payload.get("name")
+    if "name" in payload:
+        ipfs.name = payload["name"]
     keyvalues = payload.get("keyvalues", {})
     for key in keyvalues:
         attr = ipfs.attr(key)
@@ -99,7 +110,7 @@ def hash_metadata() -> Any:
     db.session.commit()
 
     # success
-    return {}, 200
+    return "OK", 200
 
 
 @app.route("/hashPinPolicy", methods=["PUT"])
@@ -109,7 +120,7 @@ def hash_pin_policy() -> Any:
     return {}, 404
 
 
-def _add_to_db(ipfs_hash, md):
+def _add_to_db(ipfs_hash, md) -> None:
     """ add an added IPFS hash to the database """
     ipfs = Ipfs(pin_hash=ipfs_hash)
     if md:
@@ -120,14 +131,6 @@ def _add_to_db(ipfs_hash, md):
             ipfs.attrs.append(IpfsAttr(key=key, value=str(keyvalues[key])))
     db.session.add(ipfs)
     db.session.commit()
-
-    # success
-    return {
-        "ipfsHash": ipfs_hash,
-        "status": "searching",
-        "id": ipfs.ipfs_id,
-        "name": ipfs.name,
-    }
 
 
 @app.route("/pinning/pinByHash", methods=["POST"])
@@ -140,23 +143,31 @@ def pin_by_hash() -> Any:
         payload = json.loads(request.data.decode("utf8"))
         ipfs_hash = payload["hashToPin"]
     except KeyError as e:
-        return {"Error": str(e)}, 400
+        return {"error": str(e)}, 500
 
     # find in database
     ipfs = db.session.query(Ipfs).filter(Ipfs.pin_hash == ipfs_hash).first()
     if ipfs:
-        return {"Error": "Already pinned"}, 400
+        return {"error": "Already pinned"}, 400
 
     # proxy
     try:
         with ipfshttpclient.connect() as client:
             client.pin.add(ipfs_hash)
     except KeyError as e:
-        return {"Error": str(e)}, 400
+        return {"error": str(e)}, 500
 
     # add to database
     md = payload.get("pinataMetadata")
-    return _add_to_db(ipfs_hash, md)
+    _add_to_db(ipfs_hash, md)
+
+    # success -- yes: this is a different case to pinFileToIPFS...
+    return {
+        "id": ipfs.ipfs_id,
+        "ipfsHash": ipfs_hash,
+        "status": "searching",
+        "name": ipfs.name,
+    }
 
 
 @app.route("/pinning/pinFileToIPFS", methods=["POST"])
@@ -168,7 +179,7 @@ def pin_file_to_ipfs() -> Any:
     try:
         fileitem = request.files["file"]
     except KeyError as e:
-        return {"Error": str(e)}, 400
+        return {"error": str(e)}, 500
 
     # proxy
     blob = fileitem.read()
@@ -176,19 +187,24 @@ def pin_file_to_ipfs() -> Any:
         with ipfshttpclient.connect() as client:
             ipfs_hash = client.add_bytes(blob)
     except ipfshttpclient.exceptions.ErrorResponse as e:
-        return {"Error": str(e)}, 400
+        return {"error": str(e)}, 500
 
     # find in database
     ipfs = db.session.query(Ipfs).filter(Ipfs.pin_hash == ipfs_hash).first()
     if ipfs:
-        return {"Error": "Already pinned"}, 400
+        return {
+            "IpfsHash": ipfs_hash,
+            "PinSize": ipfs.size,
+            "Name": ipfs.name,
+            "Timestamp": ipfs.date_pinned.isoformat(),
+        }
 
     # actually pin this time
     try:
         with ipfshttpclient.connect() as client:
             client.pin.add(ipfs_hash)
     except ipfshttpclient.exceptions.ErrorResponse as e:
-        return {"Error": str(e)}, 400
+        return {"error": str(e)}, 500
 
     # add to database
     md = {}
@@ -202,7 +218,14 @@ def pin_file_to_ipfs() -> Any:
         md["keyvalues"] = json.loads(fileitem.headers["keyvalues"].replace("'", '"'))
     except KeyError as _:
         pass
-    return _add_to_db(ipfs_hash, md)
+    _add_to_db(ipfs_hash, md)
+
+    # success -- yes: this is a different case to pinByHash...
+    return {
+        "IpfsHash": ipfs_hash,
+        "PinSize": ipfs.size,
+        "Timestamp": ipfs.date_pinned.isoformat(),
+    }
 
 
 @app.route("/pinJobs", methods=["GET"])
@@ -239,20 +262,20 @@ def unpin(ipfs_hash: str) -> Any:
     # find in database
     try:
         ipfs = db.session.query(Ipfs).filter(Ipfs.pin_hash == ipfs_hash).one()
-    except NoResultFound as e:
-        return {"Error": str(e)}, 400
+    except NoResultFound as _:
+        return {"error": "Current user has not pinned hash: {}".format(ipfs_hash)}, 500
 
     # proxy
     try:
         with ipfshttpclient.connect() as client:
             client.pin.rm(ipfs_hash)
     except ipfshttpclient.exceptions.ErrorResponse as e:
-        return {"Error": str(e)}, 400
+        return {"error": str(e)}, 500
 
     # success
     db.session.delete(ipfs)
     db.session.commit()
-    return {}, 200
+    return "OK", 200
 
 
 @app.route("/pinning/userPinPolicy", methods=["PUT"])
@@ -281,7 +304,7 @@ def pin_list() -> Any:
         with ipfshttpclient.connect() as client:
             keys = client.pin.ls()["Keys"]
     except KeyError as e:
-        return {"Error": str(e)}, 400
+        return {"error": str(e)}, 500
 
     rows = []
     for ipfs_hash in keys:
@@ -324,20 +347,20 @@ def publish_by_hash() -> Any:
         payload = json.loads(request.data.decode("utf8"))
         ipfs_hash = payload["hashToPublish"]
     except KeyError as e:
-        return {"Error": str(e)}, 400
+        return {"error": str(e)}, 500
 
     # find in database
     try:
         _ = db.session.query(Ipfs).filter(Ipfs.pin_hash == ipfs_hash).one()
     except NoResultFound as e:
-        return {"Error": str(e)}, 400
+        return {"error": str(e)}, 500
 
     # proxy
     try:
         with ipfshttpclient.connect() as client:
             ipnshash = client.name.publish(ipfs_hash)["Name"]
     except KeyError as e:
-        return {"Error": str(e)}, 400
+        return {"error": str(e)}, 500
 
     # success
-    return {"ipnsHash": ipnshash}
+    return {"IpnsHash": ipnshash}
