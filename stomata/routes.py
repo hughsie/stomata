@@ -162,13 +162,38 @@ def pin_by_hash() -> Any:
 @app.route("/pinning/pinFileToIPFS", methods=["POST"])
 @api_key_required
 def pin_file_to_ipfs() -> Any:
-    """ upload a new file and pin it to the IPFS """
+    """Upload a new file and pin it to the IPFS.
+
+    There is one special Stomata-specicif ``keyvalues`` value of
+    ``bannedCountryCodes`` that is used to ensure the export control setting
+    for the file matches that set on the server.
+
+    If the server does not prevent downloads from a country set from the
+    metadata then an error is returned and the file is not added or pinned.
+    """
 
     # get uploaded fileitem
     try:
         fileitem = request.files["file"]
     except KeyError as e:
         return {"Error": str(e)}, 400
+
+    # get metadata early to check banned country codes
+    keyvalues = {}
+    try:
+        keyvalues = json.loads(fileitem.headers["keyvalues"].replace("'", '"'))
+    except KeyError as _:
+        pass
+    try:
+        for country_code in keyvalues["bannedCountryCodes"]:
+            if country_code not in app.config["BANNED_COUNTRY_CODES"]:
+                return {
+                    "Error": "country code {} is not included in server BANNED_COUNTRY_CODES=[{}]".format(
+                        country_code, ",".join(app.config["BANNED_COUNTRY_CODES"])
+                    )
+                }, 400
+    except KeyError as _:
+        pass
 
     # proxy
     blob = fileitem.read()
@@ -194,12 +219,9 @@ def pin_file_to_ipfs() -> Any:
     md = {}
     md["name"] = fileitem.filename
     md["size"] = len(blob)
+    md["keyvalues"] = keyvalues
     try:
         md["name"] = fileitem.headers["name"]
-    except KeyError as _:
-        pass
-    try:
-        md["keyvalues"] = json.loads(fileitem.headers["keyvalues"].replace("'", '"'))
     except KeyError as _:
         pass
     return _add_to_db(ipfs_hash, md)

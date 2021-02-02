@@ -1,4 +1,4 @@
 custom.cfg
 go-ipfs
 __pycache__
-*.tar.gz
+*.gz
