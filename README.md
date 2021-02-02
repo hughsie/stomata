@@ -35,7 +35,7 @@ Set up the IPFS daemon with:
 
 You can test this locally using:
 
-    HOST="http://127.0.0.1:5000" API_KEY="Foo" SECRET_API_KEY="Bar" ./env/bin/python ./stomata/client.py ls
+    ./env/bin/python ./stomata/client.py --host http://127.0.0.1:5000 --api-key=Foo --secret-api-key-Bar ls
 
 If you get SELinux warnings, you can do:
 
