@@ -36,3 +36,8 @@ Set up the IPFS daemon with:
 You can test this locally using:
 
     HOST="http://127.0.0.1:5000" API_KEY="Foo" SECRET_API_KEY="Bar" ./env/bin/python ./stomata/client.py ls
+
+If you get SELinux warnings, you can do:
+
+    cat /var/log/audit/audit.log | grep nginx | grep denied | audit2allow -M nginx
+    semodule -i nginx.pp

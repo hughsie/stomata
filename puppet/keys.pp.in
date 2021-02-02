@@ -1,0 +1,12 @@
+# replace these with actual values
+$git_revision = 'master'
+$dbusername = 'stomata'
+$dbpassword = 'stomata'
+$dbserver = 'localhost'
+$stomata_secret_key = 'xxx'
+$server_hostname = 'localhost'
+$server_fqdn = 'http://localhost'
+$server_ip = '127.0.0.1'
+$using_ssl = False
+$stomata_api_key = 'Foo'
+$stomata_secret_api_key = 'Bar'
