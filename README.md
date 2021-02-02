@@ -24,3 +24,15 @@ Then create the schema using:
     FLASK_APP=stomata.py ./env/bin/flask initdb
     FLASK_APP=stomata.py ./env/bin/flask db stamp
     FLASK_APP=stomata.py ./env/bin/flask db upgrade
+
+Set up the IPFS daemon with:
+
+    wget https://dist.ipfs.io/go-ipfs/v0.7.0/go-ipfs_v0.7.0_linux-amd64.tar.gz
+    tar -xvzf go-ipfs_v0.7.0_linux-amd64.tar.gz
+    export IPFS_PATH=/mnt/ipfs
+    ./go-ipfs/ipfs init --profile server
+    ./go-ipfs/ipfs daemon &
+
+You can test this locally using:
+
+    HOST="http://127.0.0.1:5000" API_KEY="Foo" SECRET_API_KEY="Bar" ./env/bin/python ./stomata/client.py ls
