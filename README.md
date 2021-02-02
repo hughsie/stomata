@@ -41,3 +41,8 @@ If you get SELinux warnings, you can do:
 
     cat /var/log/audit/audit.log | grep nginx | grep denied | audit2allow -M nginx
     semodule -i nginx.pp
+
+To lock down specific country codes, you can use:
+
+    curl https://software77.net/geo-ip/?DL=1 -o geoipdata.csv.gz
+    sudo ./env/bin/python iptables.py
